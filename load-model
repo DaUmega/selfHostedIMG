@@ -1,0 +1,21 @@
+#!/bin/sh
+# load-model <file.gguf> [sd-server flags...]
+# (Re)start sd-server with a model from /models. Records the choice in
+# /id/sd-model.args so the entrypoint restores it after a container restart.
+# Runs sd-server as the ai user; the API listens on 127.0.0.1:7860.
+#
+# Examples:
+#   load-model flux2-klein-4b-fp8.gguf --vae-tiling
+#   load-model qwen-image-2.1-UC-Q4_K_M.gguf \
+#       --llm /models/qwen3vl_8b_int8_convrot.safetensors \
+#       --vae /models/qwen_image_2.1_vae_bf16.safetensors --vae-tiling
+set -e
+F="${1:?usage: load-model <file.gguf> [sd-server flags...]}"
+shift
+[ -f "/models/$F" ] || { echo "error: /models/$F not found"; exit 1; }
+echo "$F $*" > /id/sd-model.args
+pkill -x sd-server 2>/dev/null || true
+sleep 1
+nohup /app/sd-server --diffusion-model "/models/$F" \
+    --listen-ip 127.0.0.1 --listen-port 7860 "$@" >/tmp/sd-server.log 2>&1 &
+echo "[load-model] sd-server started with $F (log: /tmp/sd-server.log)"

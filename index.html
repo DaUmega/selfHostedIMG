@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>selfHostedIMG</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 840px; margin: 0 auto; padding: 1em; background: #111; color: #ddd; }
+  #topbar { display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 1.3em; margin: 0; }
+  button { cursor: pointer; }
+  #feed { margin: 1em 0; display: flex; flex-direction: column; gap: 1.2em; }
+  .msg { background: #1b1b1b; border: 1px solid #333; border-radius: 8px; padding: .8em; }
+  .msg .prompt { white-space: pre-wrap; margin-bottom: .6em; }
+  .msg img.out { max-width: 100%; border-radius: 4px; cursor: zoom-in; display: block; }
+  .msg .actions { margin-top: .5em; }
+  .msg .actions a { color: #7ab8ff; margin-right: 1em; }
+  .thumbs { display: flex; gap: .4em; flex-wrap: wrap; margin: .4em 0; }
+  .thumbs img { height: 64px; border-radius: 4px; border: 1px solid #444; }
+  .thumbwrap { position: relative; }
+  .thumbwrap button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: #a00; color: #fff; font-size: 12px; line-height: 1; padding: 0; }
+  #composer { background: #1b1b1b; border: 1px solid #333; border-radius: 8px; padding: .8em; }
+  textarea { width: 100%; height: 4.5em; background: #0d0d0d; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: .5em; box-sizing: border-box; }
+  #composerow { display: flex; gap: .8em; align-items: center; margin-top: .6em; flex-wrap: wrap; }
+  #status { min-height: 1.4em; color: #888; margin-top: .5em; }
+  #status.err { color: #f66; }
+  #genbtn { padding: .6em 1.4em; font-size: 1em; }
+  #genbtn:disabled { opacity: .5; cursor: wait; }
+  #viewer { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 10; cursor: zoom-out; align-items: center; justify-content: center; }
+  #viewer.open { display: flex; }
+  #viewer img { max-width: 96vw; max-height: 96vh; }
+  .hint { color: #666; font-size: .85em; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <h1>selfHostedIMG</h1>
+  <button onclick="clearFeed()">Clear chat</button>
+</div>
+<div id="feed"></div>
+<div id="composer">
+  <textarea id="prompt" placeholder="Describe the image... (attach reference images below for image-to-image)"></textarea>
+  <div class="thumbs" id="attachthumbs"></div>
+  <div id="composerow">
+    <label>Reference <input type="file" id="files" accept="image/*" multiple></label>
+    <label>Size
+      <select id="size">
+        <option>512x512</option><option>768x768</option>
+        <option selected>1024x1024</option><option>1024x768</option>
+      </select>
+    </label>
+    <button id="genbtn" onclick="generate()">Generate</button>
+    <span class="hint">Ctrl+Enter to generate</span>
+  </div>
+  <div id="status"></div>
+</div>
+<div id="viewer" onclick="this.classList.remove('open')"><img id="viewerimg" alt=""></div>
+<script>
+let attached = []; // File objects staged for the next generation
+const $ = id => document.getElementById(id);
+
+function setStatus(msg, isErr) {
+  const el = $('status');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+}
+
+$('files').addEventListener('change', e => {
+  for (const f of e.target.files) attached.push(f);
+  e.target.value = '';
+  renderThumbs();
+});
+
+function renderThumbs() {
+  const box = $('attachthumbs');
+  box.innerHTML = '';
+  attached.forEach((f, i) => {
+    const wrap = document.createElement('span');
+    wrap.className = 'thumbwrap';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    const x = document.createElement('button');
+    x.textContent = 'x';
+    x.title = 'remove';
+    x.onclick = () => { attached.splice(i, 1); renderThumbs(); };
+    wrap.append(img, x);
+    box.appendChild(wrap);
+  });
+}
+
+function addMsg(prompt, files, b64) {
+  const feed = $('feed');
+  const div = document.createElement('div');
+  div.className = 'msg';
+  const p = document.createElement('div');
+  p.className = 'prompt';
+  p.textContent = prompt;
+  div.appendChild(p);
+  if (files.length) {
+    const th = document.createElement('div');
+    th.className = 'thumbs';
+    for (const f of files) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      th.appendChild(img);
+    }
+    div.appendChild(th);
+  }
+  const img = document.createElement('img');
+  img.className = 'out';
+  img.src = 'data:image/png;base64,' + b64;
+  img.onclick = () => { $('viewerimg').src = img.src; $('viewer').classList.add('open'); };
+  div.appendChild(img);
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const dl = document.createElement('a');
+  dl.textContent = 'download png';
+  dl.href = img.src;
+  dl.download = 'selfhostedimg-' + Date.now() + '.png';
+  actions.appendChild(dl);
+  div.appendChild(actions);
+  feed.appendChild(div);
+  div.scrollIntoView({behavior: 'smooth', block: 'end'});
+}
+
+function clearFeed() {
+  if ($('feed').children.length && !confirm('Clear the whole chat history?')) return;
+  $('feed').innerHTML = '';
+}
+
+async function generate() {
+  const prompt = $('prompt').value.trim();
+  if (!prompt) return setStatus('Enter a prompt first.', true);
+  const btn = $('genbtn');
+  btn.disabled = true;
+  setStatus('Generating...');
+  const files = attached.slice();
+  try {
+    let r;
+    if (files.length) {
+      const fd = new FormData();
+      for (const f of files) fd.append('image', f);
+      fd.append('prompt', prompt);
+      fd.append('size', $('size').value);
+      r = await fetch('/v1/images/edits', {method: 'POST', body: fd});
+    } else {
+      r = await fetch('/v1/images/generations', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt, size: $('size').value})
+      });
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+    const j = await r.json();
+    addMsg(prompt, files, j.data[0].b64_json);
+    $('prompt').value = '';
+    attached = [];
+    renderThumbs();
+    setStatus('Done.');
+  } catch (e) { setStatus('Error: ' + e.message, true); }
+  btn.disabled = false;
+}
+
+$('prompt').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generate();
+});
+</script>
+</body>
+</html>
