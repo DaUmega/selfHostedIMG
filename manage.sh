@@ -232,7 +232,7 @@ cmd_auth() {
         *) die "That doesn't look like an SSH public key." ;;
     esac
     is_running || die "Container not running. Run: ./manage.sh start"
-    [ "$restricted" -eq 1 ] && key="restrict,permitopen=\"localhost:${UI_PORT}\",no-pty $key"
+    [ "$restricted" -eq 1 ] && key="restrict,port-forwarding,permitopen=\"localhost:${UI_PORT}\",no-pty $key"
     printf '%s\n' "$key" | docker exec -i "$CONTAINER" sh -c '
         k=$(cat)
         f=/home/ai/.ssh/authorized_keys
@@ -275,7 +275,8 @@ cmd_share() {
 
     bold "Send this to your loved ones (web UI only - no shell access):"
     echo
-    echo "  ssh -o \"ProxyCommand=nc -X 5 -x 127.0.0.1:9050 %h %p\" -o ServerAliveInterval=30 -L ${UI_PORT}:localhost:${UI_PORT} -N ai@${onion}"
+    echo "  torsocks ssh -N -L 127.0.0.1:${UI_PORT}:localhost:${UI_PORT} ai@${onion}"
+    dim "  no torsocks? ssh -o \"ProxyCommand=nc -X 5 -x 127.0.0.1:9050 %h %p\" -N -L 127.0.0.1:${UI_PORT}:localhost:${UI_PORT} ai@${onion}"
     echo
     dim "  1. They need Tor running locally (Tor Browser also works: use -x 127.0.0.1:9150)"
     dim "  2. Their key must be added first: ./manage.sh auth \"<their-pubkey>\" --restricted"
@@ -395,6 +396,7 @@ cmd_help() {
     echo "  ./manage.sh auth \"ssh-ed25519 AAAA...\"   # your key"
     echo "  ./manage.sh onion                        # prints the .onion address"
     echo "  ssh -o \"ProxyCommand=nc -X 5 -x 127.0.0.1:9050 %h %p\" ai@\$(./manage.sh onion)"
+    echo "  # no nc?  torsocks ssh ai@\$(./manage.sh onion)"
     echo "  # inside:  curl -L -o /models/flux2-klein-4b-fp8.gguf <url>"
     echo "  # inside:  load-model flux2-klein-4b-fp8.gguf --vae-tiling"
 }
